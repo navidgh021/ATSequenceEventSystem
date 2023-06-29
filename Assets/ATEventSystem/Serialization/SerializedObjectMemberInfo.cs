@@ -1,0 +1,158 @@
+using System;
+using UnityEngine;
+using System.Collections.Generic;
+using System.Reflection;
+using AT.Utility;
+
+namespace AT.Serialization
+{
+    public struct SerializedObjectMemberInfo
+    { 
+        private readonly MemberInfo _memberInfo;
+
+        private readonly bool _hideInEditor; 
+         
+        public SerializedObjectMemberInfo ( FieldInfo fieldInfo , bool hideInEditor = false )
+        {
+            _memberInfo = fieldInfo;
+            _hideInEditor = hideInEditor;
+        }
+
+        public SerializedObjectMemberInfo ( PropertyInfo propertyInfo , bool hideInEditor = false )
+        {
+            _memberInfo = null;
+            _hideInEditor = hideInEditor;
+        }
+
+        public static implicit operator MemberInfo ( SerializedObjectMemberInfo field )
+        {
+            return field._memberInfo;
+        }
+
+        public string GetName ( )
+        {
+            return _memberInfo.Name.TrimStart ( '_' );
+        }
+
+        public bool HideInEditor ( )
+        {
+            return _hideInEditor;
+        }
+
+        public Type GetFieldType ( )
+        {
+            if ( _memberInfo != null ) {
+                if ( _memberInfo is FieldInfo )
+                    return ( ( FieldInfo ) _memberInfo ).FieldType;
+                else
+                    return ( ( PropertyInfo ) _memberInfo ).PropertyType;
+            }
+
+            return null;
+        }
+
+        public void SetValue ( object obj , object value )
+        {
+            if ( _memberInfo != null ) {
+                if ( _memberInfo is FieldInfo )
+                    ( ( FieldInfo ) _memberInfo ).SetValue ( obj , value );
+                else
+                    ( ( PropertyInfo ) _memberInfo ).SetValue ( obj , value , null );
+            }
+        }
+
+        public object GetValue ( object obj )
+        {
+            try {
+                if ( _memberInfo != null ) {
+                    if ( _memberInfo is FieldInfo )
+                        return ( ( FieldInfo ) _memberInfo ).GetValue ( obj );
+                    else
+                        return ( ( PropertyInfo ) _memberInfo ).GetValue ( obj , null );
+                }
+            } 
+            catch {
+
+            }
+
+            return null;
+        }
+
+        public static SerializedObjectMemberInfo [ ] GetSerializedFields ( Type objType )
+        {  
+            List<SerializedObjectMemberInfo> serializedFields = new List<SerializedObjectMemberInfo> ( );
+
+            BindingFlags bindingAttr = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
+             
+            FieldInfo [ ] fields = objType.GetFields ( bindingAttr );
+            foreach ( FieldInfo field in fields ) {
+                if ( ( field.IsPublic && !field.IsNotSerialized ) || ( !field.IsPublic && SystemUtils.GetAttribute<SerializeField> ( field ) != null ) ) {
+                    bool hideInEditor = SystemUtils.GetAttribute<HideInInspector> ( field ) != null;
+                    SerializedObjectMemberInfo serializedField = new SerializedObjectMemberInfo ( field , hideInEditor );
+                    serializedFields.Add ( serializedField );
+                }
+            }
+             
+            PropertyInfo [ ] properties = objType.GetProperties ( bindingAttr );
+            foreach ( PropertyInfo property in properties ) {
+                if ( SystemUtils.GetAttribute<SerializeField> ( property ) != null ) {
+                    bool hideInEditor = SystemUtils.GetAttribute<HideInInspector> ( property ) != null;
+                    SerializedObjectMemberInfo serializedField = new SerializedObjectMemberInfo ( property , hideInEditor );
+                    serializedFields.Add ( serializedField );
+                }
+            }
+
+            return serializedFields.ToArray ( );
+        }
+
+        public static bool FindSerializedField ( Type objType , string id , out SerializedObjectMemberInfo field )
+        {
+            SerializedObjectMemberInfo [ ] serializedFields = GetSerializedFields ( objType );
+            foreach ( SerializedObjectMemberInfo serializedField in serializedFields ) {
+                if ( serializedField.GetName ( ) == id ) {
+                    field = serializedField;
+                    return true;
+                }
+            }
+
+            field = new SerializedObjectMemberInfo ( );
+            return false;
+        }
+
+        public static object [ ] GetSerializedFieldInstances ( object obj )
+        {
+            SerializedObjectMemberInfo [ ] serializedFields = GetSerializedFields ( obj.GetType ( ) );
+            List<object> fieldInstances = new List<object> ( );
+
+            foreach ( SerializedObjectMemberInfo serializedField in serializedFields ) {
+                if ( serializedField.GetFieldType ( ).IsArray ) {
+                    Array array = ( Array ) serializedField.GetValue ( obj );
+
+                    if ( array != null ) {
+                        for ( int i = 0 ; i < array.Length ; i++ ) {
+                            fieldInstances.Add ( array.GetValue ( i ) );
+                        }
+                    }
+                }
+                else {
+                    object newObj = serializedField.GetValue ( obj );
+                    if ( newObj != null )
+                        fieldInstances.Add ( newObj );
+                }
+            }
+
+            return fieldInstances.ToArray ( );
+        }
+
+        public static object GetSerializedFieldInstance ( object obj , string id )
+        {
+            SerializedObjectMemberInfo fieldInfo;
+
+            if ( FindSerializedField ( obj.GetType ( ) , id , out fieldInfo ) ) {
+                return fieldInfo.GetValue ( obj );
+            }
+
+            return null;
+        } 
+    }
+}
